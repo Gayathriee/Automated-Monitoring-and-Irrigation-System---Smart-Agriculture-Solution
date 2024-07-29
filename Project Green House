@@ -1,0 +1,260 @@
+// Import required libraries
+#include "WiFi.h"
+#include "ESPAsyncWebServer.h"
+#include <Adafruit_Sensor.h>
+#include <DHT.h>
+#include <Arduino.h>
+
+// Replace with your network credentials
+const char* ssid = "The Republic";
+const char* password = "lotr1234";
+
+#define DHTPIN 27     // Digital pin connected to the DHT sensor
+#define SOIL_MOISTURE_PIN 33
+#define PUMP_PIN 13  
+
+// Uncomment the type of sensor in use:
+//#define DHTTYPE    DHT11     // DHT 11
+#define DHTTYPE    DHT22     // DHT 22 (AM2302)
+//#define DHTTYPE    DHT21     // DHT 21 (AM2301)
+
+// Define threshold for turning on the pump (adjust as needed)
+#define MOISTURE_THRESHOLD 10  // adjust according to your requirements
+
+
+DHT dht(DHTPIN, DHTTYPE);
+
+// Create AsyncWebServer object on port 80
+AsyncWebServer server(80);
+
+String readDHTTemperature() {
+  // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
+  // Read temperature as Celsius (the default)
+  float t = dht.readTemperature();
+  // Read temperature as Fahrenheit (isFahrenheit = true)
+  //float t = dht.readTemperature(true);
+  // Check if any reads failed and exit early (to try again).
+  if (isnan(t)) {    
+    Serial.println("Failed to read from DHT sensor!");
+    return "--";
+  }
+  else {
+    Serial.println(t);
+    return String(t);
+  }
+}
+
+String readDHTHumidity() {
+  // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
+  float h = dht.readHumidity();
+  if (isnan(h)) {
+    Serial.println("Failed to read from DHT sensor!");
+    return "--";
+  }
+  else {
+    Serial.println(h);
+    return String(h);
+  }
+}
+float readSoilMoisture() {
+  int soilMoistureValue = analogRead(SOIL_MOISTURE_PIN);
+  // Map the analog reading (0-4095) to a percentage (0-100)
+  float moisturePercentage = map(soilMoistureValue, 0, 4095, 0, 100);
+  moisturePercentage = 100 - moisturePercentage;
+  return moisturePercentage;
+}
+bool isPumpOn() {
+  return digitalRead(PUMP_PIN) == HIGH;
+}
+const char index_html[] PROGMEM = R"rawliteral(
+    <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>H2O</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- GOOGLE FONTS  -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400..900&family=Playfair+Display+SC:ital,wght@0,400;0,700;0,900;1,400;1,700;1,900&display=swap" rel="stylesheet">
+<style>
+    html{
+    font-family: Arial, Helvetica, sans-serif;
+    display: inline-block;
+    margin: 0px auto;
+    text-align: center;
+   background-color: rgb(70, 70, 132);
+}
+#sec-1{
+    background-color: black;
+}
+h2{
+    font-size: 3.5rem;
+    font-family: "Playfair Display SC", serif;
+   color: white;
+}
+p{
+    font-size: 3.0rem;
+
+}
+.units{
+    font-size: 1.2rem;
+   
+}
+i{
+    font-size: 35px;
+}
+.cards{
+    border: 1px solid white;
+    border-radius: 3px;
+    padding: 20px;
+    margin: 50px;
+    width: 50%;
+    height: 50%;
+    margin-left: 25%;
+   background-color: white;
+   box-shadow: 4px 4px rgb(34, 33, 33);
+}
+.dht-labels{
+    font-size: 1.5rem;
+    vertical-align:middle;
+    padding: 10px;
+   
+  }
+  p{
+    color: white;
+    font-size: 12px;
+  }
+ .card{
+  background-color: black;
+  padding-bottom: 2%;
+  padding-top: 2%;
+ }
+ .card-header, .card-title{
+  color: white;
+ }
+
+</style>
+</head>
+<body>
+    <h2>Smart Green House</h2>
+    <div class="cards">
+        <h3 class="dht-labels">Temperature</h3>
+        <i class="fa-solid fa-temperature-high" style="color: #42b724;"></i>
+        <span id="temperature">%TEMPERATURE%</span>
+        <sup class="units">°C</sup>
+    </div>
+    <div class="cards">
+        <h3  class="dht-labels">Humidity</h3>
+        <i class="fa-solid fa-droplet" style="color: #3e88c1;"></i>
+        <span id="humidity">%HUMIDITY%</span>
+        <sup class="units">%</sup>
+    </div>
+    <div class="cards">
+      <h3  class="dht-labels">Soil Moisture</h3>
+      <i class="fa-solid fa-droplet" style="color: #e8cb2b;"></i>
+      <span id="humidity">%SOIL MOISTURE%</span>
+      <sup class="units">%</sup>
+  </div>
+  <div class="cards">
+    <h3  class="dht-labels">Pump Status</h3>
+    <i class="fas fa-power-off" style="color:#ff0000;"></i> 
+      <span id="pump_status">%PUMP_STATUS%</span>
+      <sup class="units">%</sup>
+  </div>
+  <!-- Footer -->
+  <div class="card">
+    <div class="card-header">
+      Smart Green House
+    </div>
+    <div class="card-body">
+      <h5 class="card-title">&copy; All rights reserved</h5>
+      <p class="card-text">Pathum Kularatne, Sasitha Gamarala, Asma Thowfeek, Gayathri Hapukotuwa</p>
+    </div>
+  </div>
+  <script src="./script.js "></script>
+</body>
+</html>)rawliteral";
+
+// Replaces placeholder with DHT values
+String processor(const String& var){
+  //Serial.println(var);
+  if(var == "TEMPERATURE"){
+    return readDHTTemperature();
+  }
+  else if(var == "HUMIDITY"){
+    return readDHTHumidity();
+  }
+   if(var == "TEMPERATURE"){
+    return readDHTTemperature();
+  }
+  else if(var == "HUMIDITY"){
+    return readDHTHumidity();
+  }
+  else if(var == "SOIL_MOISTURE"){
+    return String(readSoilMoisture());
+  }
+  else if(var == "PUMP_STATUS"){
+    return isPumpOn() ? "On" : "Off";
+  }
+  return String();
+}
+
+void setup(){
+  // Serial port for debugging purposes
+  Serial.begin(115200);
+
+  dht.begin();
+  pinMode(SOIL_MOISTURE_PIN, INPUT);
+  pinMode(PUMP_PIN, OUTPUT);
+  
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi..");
+  }
+
+  // Print ESP32 Local IP Address
+  Serial.println(WiFi.localIP());
+
+  // Route for root / web page
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/html", index_html, processor);
+  });
+  server.on("/temperature", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", readDHTTemperature().c_str());
+  });
+  server.on("/humidity", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", readDHTHumidity().c_str());
+  });
+  server.on("/soilmoisture", HTTP_GET, [](AsyncWebServerRequest *request){
+  request->send_P(200, "text/plain", String(readSoilMoisture()).c_str());
+  });
+  server.on("/pumpstatus", HTTP_GET, [](AsyncWebServerRequest *request){
+  request->send_P(200, "text/plain", isPumpOn() ? "On" : "Off");
+  });
+
+
+  // Start server
+  server.begin();
+}
+ 
+void loop(){
+  // Read soil moisture level
+  float moisturePercentage = readSoilMoisture();
+
+  // Check if soil moisture is below threshold
+  if (moisturePercentage < MOISTURE_THRESHOLD) {
+    // Turn on the pump
+    digitalWrite(PUMP_PIN, HIGH);
+  } else {
+    // Turn off the pump
+    digitalWrite(PUMP_PIN, LOW);
+  }
+
+  // Add a delay to prevent rapid readings and pump switching
+  delay(1000); // Adjust delay as needed
+}
